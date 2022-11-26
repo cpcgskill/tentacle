@@ -4,7 +4,7 @@ mod dt;
 mod ast;
 
 use clap::Parser;
-use crate::dt::{ErrorKind, TResult, ValueObject, WrapValueObject};
+use crate::dt::{ErrorKind, ValueObject, WrapValueObject};
 
 fn doit(f: &str, target: &str) {
     let code = std::fs::read_to_string(f).expect(format!("open file({}) failed", f).as_str());
