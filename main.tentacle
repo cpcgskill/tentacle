@@ -1,4 +1,8 @@
+$win_target_name = "./tentacle.exe"
+
 target $clean:
-    message target main is $clean
-target $main:$clean
-    message target main is $main
+    rm $win_target_name
+
+target $build: $clean
+    cargo build --release
+    cp ./target/release/tentacle.exe $win_target_name

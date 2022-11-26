@@ -3,7 +3,7 @@ mod rt;
 mod dt;
 mod ast;
 
-use std::env::args;
+use clap::Parser;
 use crate::dt::{ErrorKind, TResult, ValueObject, WrapValueObject};
 
 fn doit(f: &str, target: &str) {
@@ -35,11 +35,23 @@ fn doit(f: &str, target: &str) {
     }
 }
 
+/// 一个用于项目构建的编程语言
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// 构建目标
+    target: String,
+
+    /// 代码文件
+    #[arg(short, long)]
+    file: Option<String>,
+}
+
 fn main() {
-    let args = args().collect::<Vec<String>>();
-    if args.len() != 2{
-        panic!("args error")
-    }
-    let target = args.get(1).expect("args error");
-    doit("./main.tentacle", target.as_str())
+    let args: Args = Args::parse();
+
+    doit(
+        args.file.unwrap_or("./main.tentacle".to_string()).as_str(),
+        args.target.as_str(),
+    )
 }
