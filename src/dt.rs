@@ -16,11 +16,16 @@ pub trait ValueObject: Any {
     fn sub(&self, right: &Box<dyn ValueObject>) -> TResult<WrapValueObject> { Err(ErrorKind::FunctionNotImplemented) }
     fn mul(&self, right: &Box<dyn ValueObject>) -> TResult<WrapValueObject> { Err(ErrorKind::FunctionNotImplemented) }
     fn div(&self, right: &Box<dyn ValueObject>) -> TResult<WrapValueObject> { Err(ErrorKind::FunctionNotImplemented) }
+
+    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> { Err(ErrorKind::FunctionNotImplemented) }
+    fn not_eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> { Ok(!(self.eq(right)?)) }
+
     fn to_str(&self) -> TResult<String> {
         // format!("{}", self.type_id())
         // let p = unsafe { self as *const i32 as usize };
         Ok(format!("object <{:p}>", self))
     }
+    fn to_bool(&self) -> TResult<bool> { Ok(true) }
 }
 
 pub fn downcast_ref<T: 'static>(v: &Box<dyn ValueObject>) -> Option<&T> {
@@ -88,6 +93,16 @@ impl WrapValueObject {
     // pub fn unwrap_mut(&self) -> RefMut<Box<dyn ValueObject>> {
     //     self.obj.borrow_mut()
     // }
+    pub fn t_eq(&self, right: Self) -> TResult<WrapValueObject> {
+        let v = self.unwrap().eq(right.unwrap())?;
+        Ok(WrapValueObject::from_box(Box::new(v)))
+    }
+    pub fn t_not_eq(&self, right: Self) -> TResult<WrapValueObject> {
+        let v = self.unwrap().eq(right.unwrap())?;
+        Ok(WrapValueObject::from_box(Box::new(v)))
+    }
+    pub fn to_str(&self) -> TResult<String> { self.unwrap().to_str() }
+    pub fn to_bool(&self) -> TResult<bool> { self.unwrap().to_bool() }
 }
 
 pub type TResult<T> = Result<T, ErrorKind>;
@@ -182,8 +197,20 @@ impl ValueObject for i64 {
             Err(ErrorKind::FunctionNotImplemented)
         }
     }
+    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> {
+        if let Some(right) = downcast_ref::<i64>(right) {
+            Ok((*self) == (*right))
+        } else if let Some(right) = downcast_ref::<f64>(right) {
+            Ok(((*self) as f64) == (*right))
+        } else {
+            Ok(false)
+        }
+    }
     fn to_str(&self) -> TResult<String> {
         Ok(format!("{}", self))
+    }
+    fn to_bool(&self) -> TResult<bool> {
+        Ok((*self) != (0 as i64))
     }
 }
 
@@ -232,8 +259,20 @@ impl ValueObject for f64 {
             Err(ErrorKind::FunctionNotImplemented)
         }
     }
+    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> {
+        if let Some(right) = downcast_ref::<i64>(right) {
+            Ok((*self) == ((*right) as f64))
+        } else if let Some(right) = downcast_ref::<f64>(right) {
+            Ok((*self) == (*right))
+        } else {
+            Ok(false)
+        }
+    }
     fn to_str(&self) -> TResult<String> {
         Ok(format!("{}", self))
+    }
+    fn to_bool(&self) -> TResult<bool> {
+        Ok((*self) != (0 as f64))
     }
 }
 
@@ -259,11 +298,26 @@ impl ValueObject for String {
         }
         return Err(ErrorKind::FunctionNotImplemented);
     }
+    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> {
+        if let Some(right) = downcast_ref::<Self>(right) {
+            Ok((*self) == (*right))
+        } else {
+            Ok(false)
+        }
+    }
     fn to_str(&self) -> TResult<String> {
         Ok(self.clone())
     }
 }
 
+impl ValueObject for bool {
+    fn to_str(&self) -> TResult<String> {
+        Ok(format!("{}", self))
+    }
+    fn to_bool(&self) -> TResult<bool> {
+        Ok(*self)
+    }
+}
 
 pub type TList = Vec<WrapValueObject>;
 
@@ -292,9 +346,11 @@ impl ValueObject for TList {
 pub struct TNone;
 
 impl ValueObject for TNone {
+    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> { Ok(self.tid() == right.tid()) }
     fn to_str(&self) -> TResult<String> {
         Ok(format!("None"))
     }
+    fn to_bool(&self) -> TResult<bool> { Ok(false) }
 }
 
 impl TNone {

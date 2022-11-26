@@ -7,16 +7,15 @@ pub type LocalCommandFunctionType = fn(Vec<String>) -> TResult<WrapValueObject>;
 #[derive(Debug, Clone)]
 pub struct RunSpace {
     local_commands: HashMap<String, LocalCommandFunctionType>,
-    parent: Option<Box<RunSpace>>,
-    this: HashMap<String, WrapValueObject>,
+    vars: HashMap<String, WrapValueObject>,
 }
 
 impl RunSpace {
     pub fn set(&mut self, key: &str, value: WrapValueObject) {
-        self.this.insert(key.to_string(), value.clone());
+        self.vars.insert(key.to_string(), value.clone());
     }
     pub fn get(&self, key: &str) -> Option<WrapValueObject> {
-        self.this.get(key).map(|v| { v.clone() })
+        self.vars.get(key).map(|v| { v.clone() })
     }
     pub fn add_local_command(&mut self, name: &str, f: LocalCommandFunctionType) {
         self.local_commands.insert(name.to_string(), f);
@@ -27,8 +26,7 @@ impl Default for RunSpace {
     fn default() -> Self {
         let mut space = Self {
             local_commands: HashMap::new(),
-            parent: None,
-            this: HashMap::default(),
+            vars: HashMap::default(),
         };
         space.add_local_command(
             "message",
@@ -68,6 +66,8 @@ pub fn exec_ast(ast: &ast::Node, space: &mut RunSpace) -> TResult<WrapValueObjec
             let right_value = exec_ast(right_node, space)?;
 
             match op {
+                ast::OperatorData::Eq => { left_value.t_eq(right_value) }
+                ast::OperatorData::NotEq => { left_value.t_not_eq(right_value) }
                 ast::OperatorData::Add => { left_value.unwrap().add(right_value.unwrap()) }
                 ast::OperatorData::Sub => { left_value.unwrap().sub(right_value.unwrap()) }
                 ast::OperatorData::Mul => { left_value.unwrap().mul(right_value.unwrap()) }
@@ -112,13 +112,36 @@ pub fn exec_ast(ast: &ast::Node, space: &mut RunSpace) -> TResult<WrapValueObjec
             space.set(name, WrapValueObject::from_box(Box::new(v)));
             Ok(TNone::a_none())
         }
-        ast::Node::Module { body } => {
-            let mut res = TList::new();
-            for i in body {
-                let v = exec_ast(i, space)?;
-                res.push(v);
+        ast::Node::If { if_node, elif_nodes, else_node } => {
+            let (check_exp, body) = if_node.as_ref();
+            let v = exec_ast(check_exp, space)?;
+            if exec_ast(check_exp, space)?.to_bool()? {
+                for i in body {
+                    exec_ast(i, space)?;
+                }
+                return Ok(TNone::a_none());
             }
-            Ok(WrapValueObject::from_box(Box::new(res)))
+            for (check_exp, body) in elif_nodes {
+                if exec_ast(check_exp, space)?.to_bool()? {
+                    for i in body {
+                        exec_ast(i, space)?;
+                    }
+                    return Ok(TNone::a_none());
+                }
+            }
+            if let Some(body) = else_node {
+                for i in body {
+                    exec_ast(i, space)?;
+                }
+                return Ok(TNone::a_none());
+            }
+            return Ok(TNone::a_none());
+        }
+        ast::Node::Module { body } => {
+            for i in body {
+                exec_ast(i, space)?;
+            }
+            Ok(TNone::a_none())
         }
     }
 }
@@ -202,8 +225,29 @@ message test_command3 target_index ($target_index+-1)
 target $clean:
     message target clean is $clean
 target $build: $clean
+    "用于测试的target"
     message target build is $build
 message test_print_target $build
+
+$select = 0
+if $select == 0:
+    message test eq and not eq "$select is" 0
+elif $select == 1:
+    message test eq and not eq "$select is" 1
+elif $select == 2:
+    message test eq and not eq "$select is" 2
+else:
+    message test eq and not eq "$select is not (0, 1, 2)"
+
+$select = "a"
+if $select == "a":
+    message test eq and not eq "$select is" a
+elif $select == "b":
+    message test eq and not eq "$select is" b
+elif $select == "c":
+    message test eq and not eq "$select is" c
+else:
+    message test eq and not eq "$select is not (a, b, c)"
 "###;
         let mut space = RunSpace::default();
         println!("# test exec_code: ");

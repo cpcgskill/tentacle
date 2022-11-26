@@ -4,5 +4,6 @@ target $clean:
     rm $win_target_name
 
 target $build: $clean
+    "构建发布的二进制程序, 目前仅支持Windows"
     cargo build --release
     cp ./target/release/tentacle.exe $win_target_name

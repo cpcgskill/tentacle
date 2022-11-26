@@ -2,6 +2,8 @@ use crate::dt::{ValueObject};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum OperatorData {
+    Eq,
+    NotEq,
     Add,
     Sub,
     Mul,
@@ -12,6 +14,8 @@ impl OperatorData {
     // 获得运算符优先级
     pub fn get_priority(&self) -> isize {
         match self {
+            Self::Eq => -1,
+            Self::NotEq => -1,
             Self::Add => 0,
             Self::Sub => 0,
             Self::Mul => 1,
@@ -45,6 +49,11 @@ pub enum Node {
         name: String,
         require: Vec<String>,
         body: Vec<Node>,
+    },
+    If {
+        if_node: Box<(Node, Vec<Node>)>,
+        elif_nodes: Vec<(Node, Vec<Node>)>,
+        else_node: Option<Vec<Node>>,
     },
     Module {
         body: Vec<Node>,

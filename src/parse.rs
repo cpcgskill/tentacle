@@ -59,12 +59,21 @@ impl<'a> Parser {
     }
 
     pub fn parse_operator_data(input: &str) -> IResult<&str, OperatorData> {
-        let (input, value) = alt((char('+'), char('-'), char('*'), char('/')))(input)?;
+        let (input, value) = alt((
+            tag("=="),
+            tag("!="),
+            tag("+"),
+            tag("-"),
+            tag("*"),
+            tag("/"),
+        ))(input)?;
         let value = match value {
-            '+' => OperatorData::Add,
-            '-' => OperatorData::Sub,
-            '*' => OperatorData::Mul,
-            '/' => OperatorData::Div,
+            "==" => OperatorData::Eq,
+            "!=" => OperatorData::NotEq,
+            "+" => OperatorData::Add,
+            "-" => OperatorData::Sub,
+            "*" => OperatorData::Mul,
+            "/" => OperatorData::Div,
             _ => { return fail::<_, OperatorData, _>(input); }
         };
         Ok((input, value))
@@ -178,14 +187,6 @@ impl<'a> Parser {
 
         Ok((input, left_node))
     }
-    pub fn parse_set_attr(input: &'a str) -> IResult<&'a str, Node> {
-        let (input, node) = separated_pair(
-            |input: &'a str| { Parser::parse_name(input) },
-            delimited(space0, char('='), space0),
-            |input: &'a str| { Parser::parse_expr(input) },
-        )(input)?;
-        Ok((input, Node::SetAttr { name: node.0.to_string(), value: Box::from(node.1) }))
-    }
     pub fn parse_command(input: &'a str) -> IResult<&'a str, Node> {
         let (input, command) = Parser::parse_alphanumeric_underscore(input)?;
         let (input, args) = many0(delimited(
@@ -206,6 +207,17 @@ impl<'a> Parser {
         ))(input)?;
         Ok((input, Node::Command { command: command.to_string(), args }))
     }
+    pub fn parse_set_attr(input: &'a str) -> IResult<&'a str, Node> {
+        let (input, node) = separated_pair(
+            |input: &'a str| { Parser::parse_name(input) },
+            delimited(space0, char('='), space0),
+            alt((
+                |input: &'a str| { Parser::parse_expr(input) },
+                |input: &'a str| { Parser::parse_command(input) },
+            )),
+        )(input)?;
+        Ok((input, Node::SetAttr { name: node.0.to_string(), value: Box::from(node.1) }))
+    }
     pub fn parse_crlf_or_ending(ctx: &Parser, input: &'a str) -> IResult<&'a str, ()> {
         let (input, _) = space0(input)?;
         if input.len() > 0 {
@@ -213,19 +225,20 @@ impl<'a> Parser {
             ctx.next_line();
             Ok((input, ()))
         } else {
-            ctx.next_line();
             Ok((input, ()))
         }
     }
 
     pub fn parse_blank_line(ctx: &Parser, input: &'a str) -> IResult<&'a str, ()> {
         // println!("input {:#?}", input);
+        // let (input, _) = space0(input)?;
+        // let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
         let (input, _) = pair(
             many0(alt((tag(" "), tag("\t")))),
             alt((tag("\n"), tag("\r\n"))),
         )(input)?;
         // println!("output {:#?}", input);
-        ctx.next_line();
+        // ctx.next_line();
         Ok((input, ()))
     }
 
@@ -250,6 +263,62 @@ impl<'a> Parser {
             name: name.to_string(),
             require: require_nodes,
             body,
+        }))
+    }
+
+    pub fn parse_if_block(ctx: &Parser, input: &'a str) -> IResult<&'a str, Node> {
+        let now_indentation = ctx.get_indentation();
+        // println!("parse_if_block if {:?}", input);
+        // if
+        let (input, _) = delimited(space0, tag("if"), space0)(input)?;
+        let (input, if_check_exp) = Parser::parse_expr(input)?;
+        let (input, _) = delimited(space0, tag(":"), space0)(input)?;
+        let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
+
+        let (input, if_node_body) = Parser::parse_block(ctx, input, ctx.get_indentation() + 1)?;
+        ctx.set_indentation(now_indentation);
+
+        // println!("parse_if_block elif {:?}", input);
+        // elif
+        let (input, elif_nodes) = many0(|input: &'a str| {
+            // 略过空行
+            let (input, _) = many0(|input: &'a str| { Parser::parse_blank_line(ctx, input) })(input)?;
+
+
+            let (input, _) = delimited(space0, tag("elif"), space0)(input)?;
+            let (input, check_exp) = Parser::parse_expr(input)?;
+            let (input, _) = delimited(space0, tag(":"), space0)(input)?;
+            let (input, body) = Parser::parse_block(ctx, input, ctx.get_indentation() + 1)?;
+            ctx.set_indentation(now_indentation);
+            Ok((input, (check_exp, body)))
+        })(input)?;
+
+        // println!("parse_if_block else {:?}", input);
+        // else
+        let (input, else_node) = opt(|input: &'a str| {
+            // 略过空行
+            let (input, _) = many0(|input: &'a str| { Parser::parse_blank_line(ctx, input) })(input)?;
+            // println!("parse_if_block else parse_blank_line end {:?}", input);
+
+
+            let (input, _) = delimited(space0, tag("else"), space0)(input)?;
+            let (input, _) = delimited(space0, tag(":"), space0)(input)?;
+
+            // println!("parse_if_block else keyword end {:?}", input);
+
+            let (input, body) = Parser::parse_block(ctx, input, ctx.get_indentation() + 1)?;
+            ctx.set_indentation(now_indentation);
+
+            // println!("parse_if_block else parse_block end {:?}", input);
+
+            Ok((input, body))
+        })(input)?;
+
+        // println!("parse_if_block end {:?}", input);
+        Ok((input, Node::If {
+            if_node: Box::new((if_check_exp, if_node_body)),
+            elif_nodes,
+            else_node,
         }))
     }
 
@@ -283,6 +352,12 @@ impl<'a> Parser {
                 Ok((input, node))
             },
             |input: &'a str| { Parser::parse_target_block(ctx, input) },
+            |input: &'a str| { Parser::parse_if_block(ctx, input) },
+            |input: &'a str| {
+                let (input, node) = Parser::parse_expr(input)?;
+                let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
+                Ok((input, node))
+            },
             |input: &'a str| {
                 let (input, node) = Parser::parse_command(input)?;
                 let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
@@ -301,7 +376,9 @@ impl<'a> Parser {
             alt((
                 |input: &'a str| {
                     ctx.set_indentation(need_indentation);
+                    // println!("parse_block iter item(indentation={}) start {:?}", ctx.get_indentation(), input);
                     let (input, node) = Parser::parse_item(ctx, input)?;
+                    // println!("parse_block iter item(indentation={}) end {:?}", ctx.get_indentation(), input);
                     Ok((input, node))
                 },
             ))
@@ -337,7 +414,6 @@ pub fn parse_code(input: &str) -> TResult<Node> {
 }
 
 pub fn parse_expr(input: &str) -> TResult<Node> {
-    // let line_count = input.find('\n').unwrap_or(0)
     match Parser::parse_expr(input) {
         Ok((output, node)) => {
             if output.len() > (output.find(' ').unwrap_or(0) + output.find('\t').unwrap_or(0)) {
@@ -441,46 +517,40 @@ mod test {
 
     #[test]
     fn print_build() {
-//         let code = r####"
-// $value = 15
-//
-// target clean:
-//     if v>10:
-//         message "v>10"
-//     message test_clean
-//
-// target build: clean
-//     pyeal build
-// target test_for: clean
-//     for i in [0, 1, 2, 3, 4]:
-//         message "for i="+i
-// "####;
-//         let code = r###"
-// $test_set_attr = 13
-//
-// message test_command
-//
-// $t = 15
-// $t = 15.5
-// $t = "test string"
-// $t = 1+$t*(2*15-1)
-//
-// target $build: $clean
-//     $target_index = 15
-//     message test_command target_index ($target_index+1)
-// "###;
         let code = r###"
 $target_index = 15
 message test_command1
 message test_command2 target_index ("aa" + "bb" + 15 + " " + 10.5)
 message test_command3 target_index ($target_index+1)
+"###;
+        println!("{:#?}", parse_code(code));
+        let code = r###"
+$test_value = message test_command
+"###;
+        println!("{:#?}", parse_code(code));
+        let code = r###"
+"这是一个字符串"
+"###;
+        println!("{:#?}", parse_code(code));
+        let code = r###"
+if $test_value:
+    $test_value = 0
+elif $test_value:
+    $test_value = 0
+else:
+    $test_value = 2
+if $test_value:
+    $test_value = 0
 
-target $build: $clean
-    message test_command target_index ($target_index+1)
+"###;
+        println!("{:#?}", parse_code(code));
+        let code = r###"
 target $main:
     message target main is $main"###;
         println!("{:#?}", parse_code(code));
         let code = r###"
+target $build: $clean
+    message test_command target_index ($target_index+1)
 target $main:
     message target main is $main"###;
         println!("{:#?}", parse_code(code));
