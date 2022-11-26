@@ -1,0 +1,4 @@
+target $clean:
+    message target main is $clean
+target $main:$clean
+    message target main is $main
