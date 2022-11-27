@@ -157,9 +157,9 @@ impl<'a> Parser {
     }
 
     pub fn parse_expr(input: &'a str) -> IResult<&'a str, Node> {
-        // println!("this is {:?}", input);
+        // dbg!(format!("this is {:?}", input));
         let (input, mut left_node) = Parser::parse_a_have_value_node(input)?;
-        // println!("left_node is {:?}", left_node);
+        // dbg!(format!("left_node is {:?}", left_node));
 
 
         let (input, mut right_vec) = many0(pair(
@@ -167,11 +167,11 @@ impl<'a> Parser {
             |input: &'a str| { Parser::parse_a_have_value_node(input) },
         ))(input)?;
 
-        // println!("right_vec is {:?}", right_vec);
+        // dbg!(format!("right_vec is {:?}", right_vec));
 
         while right_vec.len() > 0 {
             let (op, mut right_node) = right_vec.remove(0);
-            // println!("(op, right_node) is {:?} {:?}", op, right_node);
+            // dbg!(format!("(op, right_node) is {:?} {:?}", op, right_node));
             if right_vec.len() > 0 {
                 let (next_op, next_right_node) = right_vec.remove(0);
                 if next_op.get_priority() > op.get_priority() {
@@ -230,14 +230,14 @@ impl<'a> Parser {
     }
 
     pub fn parse_blank_line(ctx: &Parser, input: &'a str) -> IResult<&'a str, ()> {
-        // println!("input {:#?}", input);
+        // dbg!(format!("input {:#?}", input));
         // let (input, _) = space0(input)?;
         // let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
         let (input, _) = pair(
             many0(alt((tag(" "), tag("\t")))),
             alt((tag("\n"), tag("\r\n"))),
         )(input)?;
-        // println!("output {:#?}", input);
+        // dbg!(format!("output {:#?}", input));
         // ctx.next_line();
         Ok((input, ()))
     }
@@ -268,7 +268,7 @@ impl<'a> Parser {
 
     pub fn parse_if_block(ctx: &Parser, input: &'a str) -> IResult<&'a str, Node> {
         let now_indentation = ctx.get_indentation();
-        // println!("parse_if_block if {:?}", input);
+        // dbg!(format!("parse_if_block if start {:?}", input));
         // if
         let (input, _) = delimited(space0, tag("if"), space0)(input)?;
         let (input, if_check_exp) = Parser::parse_expr(input)?;
@@ -278,7 +278,7 @@ impl<'a> Parser {
         let (input, if_node_body) = Parser::parse_block(ctx, input, ctx.get_indentation() + 1)?;
         ctx.set_indentation(now_indentation);
 
-        // println!("parse_if_block elif {:?}", input);
+        // dbg!(format!("parse_if_block elif {:?}", input));
         // elif
         let (input, elif_nodes) = many0(|input: &'a str| {
             // 略过空行
@@ -293,28 +293,28 @@ impl<'a> Parser {
             Ok((input, (check_exp, body)))
         })(input)?;
 
-        // println!("parse_if_block else {:?}", input);
+        // dbg!(format!("parse_if_block else {:?}", input));
         // else
         let (input, else_node) = opt(|input: &'a str| {
             // 略过空行
             let (input, _) = many0(|input: &'a str| { Parser::parse_blank_line(ctx, input) })(input)?;
-            // println!("parse_if_block else parse_blank_line end {:?}", input);
+            // dbg!(format!("parse_if_block else parse_blank_line end {:?}", input));
 
 
             let (input, _) = delimited(space0, tag("else"), space0)(input)?;
             let (input, _) = delimited(space0, tag(":"), space0)(input)?;
 
-            // println!("parse_if_block else keyword end {:?}", input);
+            // dbg!(format!("parse_if_block else keyword end {:?}", input));
 
             let (input, body) = Parser::parse_block(ctx, input, ctx.get_indentation() + 1)?;
             ctx.set_indentation(now_indentation);
 
-            // println!("parse_if_block else parse_block end {:?}", input);
+            // dbg!(format!("parse_if_block else parse_block end {:?}", input));
 
             Ok((input, body))
         })(input)?;
 
-        // println!("parse_if_block end {:?}", input);
+        // dbg!(format!("parse_if_block end {:?}", input));
         Ok((input, Node::If {
             if_node: Box::new((if_check_exp, if_node_body)),
             elif_nodes,
@@ -326,7 +326,7 @@ impl<'a> Parser {
         let (input, value) = Parser::parse_block(ctx, input, 0)?;
         // 清空一下剩余的空字符串避免后续检测错误
         let (input, _) = alt((tag("\n"), space0))(input)?;
-        // println!("parse input {:?} len = {:?}", input, input.len());
+        // dbg!(format!("parse input {:?} len = {:?}", input, input.len()));
         Ok((input, Node::Module { body: value }))
     }
 
@@ -376,9 +376,9 @@ impl<'a> Parser {
             alt((
                 |input: &'a str| {
                     ctx.set_indentation(need_indentation);
-                    // println!("parse_block iter item(indentation={}) start {:?}", ctx.get_indentation(), input);
+                    // dbg!(format!("parse_block iter item(indentation={}) start {:?}", ctx.get_indentation(), input));
                     let (input, node) = Parser::parse_item(ctx, input)?;
-                    // println!("parse_block iter item(indentation={}) end {:?}", ctx.get_indentation(), input);
+                    // dbg!(format!("parse_block iter item(indentation={}) end {:?}", ctx.get_indentation(), input));
                     Ok((input, node))
                 },
             ))
