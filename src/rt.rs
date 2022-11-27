@@ -60,6 +60,14 @@ pub fn exec_ast(ast: &ast::Node, space: &mut RunSpace) -> TResult<WrapValueObjec
                 ast::ValueData::String(i) => { Ok(WrapValueObject::from_box(Box::new(i.clone()))) }
             }
         }
+        ast::Node::List(nodes) => {
+            let mut l = TList::new();
+            for i in nodes {
+                let v = exec_ast(i, space)?;
+                l.push(v);
+            }
+            Ok(WrapValueObject::from_box(Box::new(l)))
+        }
         ast::Node::Expr(v) => {
             let (left_node, op, right_node) = v.as_ref();
             let left_value = exec_ast(left_node, space)?;
@@ -68,10 +76,10 @@ pub fn exec_ast(ast: &ast::Node, space: &mut RunSpace) -> TResult<WrapValueObjec
             match op {
                 ast::OperatorData::Eq => { left_value.t_eq(right_value) }
                 ast::OperatorData::NotEq => { left_value.t_not_eq(right_value) }
-                ast::OperatorData::Add => { left_value.unwrap().add(right_value.unwrap()) }
-                ast::OperatorData::Sub => { left_value.unwrap().sub(right_value.unwrap()) }
-                ast::OperatorData::Mul => { left_value.unwrap().mul(right_value.unwrap()) }
-                ast::OperatorData::Div => { left_value.unwrap().div(right_value.unwrap()) }
+                ast::OperatorData::Add => { left_value.t_add(right_value) }
+                ast::OperatorData::Sub => { left_value.t_sub(right_value) }
+                ast::OperatorData::Mul => { left_value.t_mul(right_value) }
+                ast::OperatorData::Div => { left_value.t_div(right_value) }
             }
         }
         ast::Node::SetAttr { name, value } => {
@@ -137,6 +145,17 @@ pub fn exec_ast(ast: &ast::Node, space: &mut RunSpace) -> TResult<WrapValueObjec
             }
             return Ok(TNone::a_none());
         }
+        ast::Node::For { item_var_name, source_exp, body } => {
+            let source_value = exec_ast(source_exp, space)?;
+            let mut source_iter = source_value.t_get_iter()?;
+            while let Some(v) = (source_iter.t_iter_next()?) {
+                space.set(item_var_name.as_str(), v);
+                for i in body {
+                    exec_ast(i, space)?;
+                }
+            }
+            Ok(TNone::a_none())
+        }
         ast::Node::Module { body } => {
             for i in body {
                 exec_ast(i, space)?;
@@ -185,7 +204,9 @@ pub fn exec_target(space: &mut RunSpace, target: &str) -> TResult<WrapValueObjec
     let v = space.get(target);
     match v {
         Some(v) => {
-            let v = dt::downcast_ref::<dt::TTargetObject>(v.unwrap());
+            let v = v.downcast_ref::<dt::TTargetObject>();
+            // let v = &*v.unwrap();
+            // let v = dt::downcast_ref::<dt::TTargetObject>(v);
             match v {
                 Some(v) => {
                     let v = v.clone();
@@ -248,6 +269,9 @@ elif $select == "c":
     message test eq and not eq "$select is" c
 else:
     message test eq and not eq "$select is not (a, b, c)"
+
+
+message test_list [1, "1", 1+2*3, (1+2)]
 "###;
         let mut space = RunSpace::default();
         println!("# test exec_code: ");

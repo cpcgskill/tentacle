@@ -36,6 +36,7 @@ pub enum ValueData {
 pub enum Node {
     Name(String),
     Value(ValueData),
+    List(Vec<Node>),
     Expr(Box<(Node, OperatorData, Node)>),
     SetAttr {
         name: String,
@@ -54,6 +55,11 @@ pub enum Node {
         if_node: Box<(Node, Vec<Node>)>,
         elif_nodes: Vec<(Node, Vec<Node>)>,
         else_node: Option<Vec<Node>>,
+    },
+    For {
+        item_var_name: String,
+        source_exp: Box<Node>,
+        body: Vec<Node>,
     },
     Module {
         body: Vec<Node>,

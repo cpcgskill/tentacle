@@ -137,6 +137,31 @@ impl<'a> Parser {
         Ok((input, Node::Value(value)))
     }
 
+    pub fn parse_list(input: &'a str) -> IResult<&str, Node> {
+        let (input, _) = tag("[")(input)?;
+
+        let (input, start_node) = opt(|input: &'a str| { Parser::parse_expr(input) })(input)?;
+        match start_node {
+            Some(start_node) => {
+                let mut list_childs = vec![start_node];
+                let (input, nodes) = many0(pair(
+                    delimited(space0, tag(","), space0),
+                    |input: &'a str| { Parser::parse_expr(input) },
+                ))(input)?;
+                for (_, i) in nodes {
+                    list_childs.push(i);
+                }
+                let (input, _) = delimited(space0, opt(tag(",")), space0)(input)?;
+                let (input, _) = tag("]")(input)?;
+                Ok((input, Node::List(list_childs)))
+            }
+            None => {
+                let (input, _) = tag("]")(input)?;
+                Ok((input, Node::List(Vec::new())))
+            }
+        }
+    }
+
     pub fn parse_a_have_value_node(input: &'a str) -> IResult<&'a str, Node> {
         let (input, value) = delimited(
             space0,
@@ -150,6 +175,7 @@ impl<'a> Parser {
                         char(')'),
                     )(input)
                 },
+                |input: &'a str| { Parser::parse_list(input) },
             )),
             space0,
         )(input)?;
@@ -322,6 +348,21 @@ impl<'a> Parser {
         }))
     }
 
+    pub fn parse_for_block(ctx: &Parser, input: &'a str) -> IResult<&'a str, Node> {
+        let (input, _) = delimited(space0, tag("for"), space0)(input)?;
+        let (input, item_var_name) = Parser::parse_name(input)?;
+        let (input, _) = delimited(space0, tag("in"), space0)(input)?;
+        let (input, source_exp) = Parser::parse_expr(input)?;
+        let (input, _) = delimited(space0, tag(":"), space0)(input)?;
+        let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
+
+        let (input, body) = Parser::parse_block(ctx, input, ctx.get_indentation() + 1)?;
+        Ok((input, Node::For {
+            item_var_name: item_var_name.to_string(),
+            source_exp: Box::new(source_exp),
+            body,
+        }))
+    }
     pub fn parse_module(ctx: &Parser, input: &'a str) -> IResult<&'a str, Node> {
         let (input, value) = Parser::parse_block(ctx, input, 0)?;
         // 清空一下剩余的空字符串避免后续检测错误
@@ -353,6 +394,7 @@ impl<'a> Parser {
             },
             |input: &'a str| { Parser::parse_target_block(ctx, input) },
             |input: &'a str| { Parser::parse_if_block(ctx, input) },
+            |input: &'a str| { Parser::parse_for_block(ctx, input) },
             |input: &'a str| {
                 let (input, node) = Parser::parse_expr(input)?;
                 let (input, _) = Parser::parse_crlf_or_ending(ctx, input)?;
@@ -553,6 +595,15 @@ target $build: $clean
     message test_command target_index ($target_index+1)
 target $main:
     message target main is $main"###;
+        println!("{:#?}", parse_code(code));
+        let code = r###"
+message test_command [1, "1", 1+2*3, (1+2)]
+"###;
+        println!("{:#?}", parse_code(code));
+        let code = r###"
+for i in [0, 1, 2, 3, 4, 5, 6]:
+    message "index =" i
+"###;
         println!("{:#?}", parse_code(code));
     }
 }

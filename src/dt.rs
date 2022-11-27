@@ -1,7 +1,9 @@
 use std::any::{Any, TypeId};
-use std::borrow::{Borrow};
+use std::borrow::{Borrow, BorrowMut};
+use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::{Debug, Display, Formatter};
-use std::sync::{Arc};
+use std::path::Iter;
+use std::sync::{Arc, Mutex, MutexGuard};
 use crate::ast;
 
 pub trait ValueObject: Any {
@@ -25,7 +27,14 @@ pub trait ValueObject: Any {
         // let p = unsafe { self as *const i32 as usize };
         Ok(format!("object <{:p}>", self))
     }
+    fn to_repr_str(&self) -> TResult<String> {
+        let v = self.to_str()?;
+        Ok(format!(r#""{}""#, v))
+    }
     fn to_bool(&self) -> TResult<bool> { Ok(true) }
+
+    fn get_iter(&self) -> TResult<WrapValueObject> { Err(ErrorKind::FunctionNotImplemented) }
+    fn iter_next(&mut self) -> TResult<Option<WrapValueObject>> { Err(ErrorKind::FunctionNotImplemented) }
 }
 
 pub fn downcast_ref<T: 'static>(v: &Box<dyn ValueObject>) -> Option<&T> {
@@ -66,42 +75,58 @@ impl Debug for dyn ValueObject {
 
 #[derive(Debug, Clone)]
 pub struct WrapValueObject {
-    obj: Arc<Box<dyn ValueObject>>,
+    obj: Arc<RefCell<Box<dyn ValueObject>>>,
 }
 
 impl WrapValueObject {
-    // pub fn new<'a, T: 'a + Sized + ValueObject + Clone>(obj: T) -> Self {
-    //     let obj = Box::<T>::new(obj.clone());
-    //     WrapValueObject {
-    //         obj: Arc::new(RefCell::new(obj)),
-    //     }
-    // }
     pub fn from_box(obj: Box<dyn ValueObject>) -> Self {
         WrapValueObject {
-            obj: Arc::from(obj),
+            obj: Arc::from(RefCell::from(obj)),
         }
     }
-    pub fn unwrap(&self) -> &Box<dyn ValueObject> {
-        self.obj.borrow()
+    pub fn unwrap(&self) -> Ref<'_, Box<dyn ValueObject>> {
+        RefCell::borrow(self.obj.borrow())
     }
-    // pub fn unwrap_mut(&mut self) -> &mut Box<dyn ValueObject> {
-    //     self.obj.borrow_mut()
-    // }
-    // pub fn unwrap(&self) -> Ref<Box<dyn ValueObject>> {
-    //     self.obj.borrow()
-    // }
-    // pub fn unwrap_mut(&self) -> RefMut<Box<dyn ValueObject>> {
-    //     self.obj.borrow_mut()
-    // }
+    pub fn unwrap_mut(&self) -> RefMut<'_, Box<dyn ValueObject>> {
+        RefCell::borrow_mut(self.obj.borrow())
+    }
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        let v = &*self.unwrap();
+        if TypeId::of::<T>() == v.tid() {
+            Some(unsafe { &*(v as *const dyn Any as *const Box<T>) })
+        } else {
+            None
+        }
+    }
+    pub fn t_add(&self, right: Self) -> TResult<WrapValueObject> {
+        // let v = right.unwrap();
+        // v.add()
+        self.unwrap().add(&*right.unwrap())
+    }
+    pub fn t_sub(&self, right: Self) -> TResult<WrapValueObject> {
+        self.unwrap().sub(&*right.unwrap())
+    }
+    pub fn t_mul(&self, right: Self) -> TResult<WrapValueObject> {
+        self.unwrap().mul(&*right.unwrap())
+    }
+    pub fn t_div(&self, right: Self) -> TResult<WrapValueObject> {
+        self.unwrap().div(&*right.unwrap())
+    }
+
     pub fn t_eq(&self, right: Self) -> TResult<WrapValueObject> {
-        let v = self.unwrap().eq(right.unwrap())?;
+        let v = self.unwrap().eq(&*right.unwrap())?;
         Ok(WrapValueObject::from_box(Box::new(v)))
     }
     pub fn t_not_eq(&self, right: Self) -> TResult<WrapValueObject> {
-        let v = self.unwrap().eq(right.unwrap())?;
+        let v = self.unwrap().eq(&*right.unwrap())?;
         Ok(WrapValueObject::from_box(Box::new(v)))
     }
+    pub fn t_get_iter(&self) -> TResult<WrapValueObject> { self.unwrap().get_iter() }
+    pub fn t_iter_next(&mut self) -> TResult<Option<WrapValueObject>> { self.unwrap_mut().iter_next() }
+
+
     pub fn to_str(&self) -> TResult<String> { self.unwrap().to_str() }
+    pub fn to_repr_str(&self) -> TResult<String> { self.unwrap().to_repr_str() }
     pub fn to_bool(&self) -> TResult<bool> { self.unwrap().to_bool() }
 }
 
@@ -209,6 +234,9 @@ impl ValueObject for i64 {
     fn to_str(&self) -> TResult<String> {
         Ok(format!("{}", self))
     }
+    fn to_repr_str(&self) -> TResult<String> {
+        self.to_str()
+    }
     fn to_bool(&self) -> TResult<bool> {
         Ok((*self) != (0 as i64))
     }
@@ -271,6 +299,9 @@ impl ValueObject for f64 {
     fn to_str(&self) -> TResult<String> {
         Ok(format!("{}", self))
     }
+    fn to_repr_str(&self) -> TResult<String> {
+        self.to_str()
+    }
     fn to_bool(&self) -> TResult<bool> {
         Ok((*self) != (0 as f64))
     }
@@ -314,12 +345,43 @@ impl ValueObject for bool {
     fn to_str(&self) -> TResult<String> {
         Ok(format!("{}", self))
     }
+    fn to_repr_str(&self) -> TResult<String> {
+        self.to_str()
+    }
     fn to_bool(&self) -> TResult<bool> {
         Ok(*self)
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct TNone;
+
+impl ValueObject for TNone {
+    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> { Ok(self.tid() == right.tid()) }
+    fn to_str(&self) -> TResult<String> {
+        Ok(format!("None"))
+    }
+    fn to_repr_str(&self) -> TResult<String> {
+        self.to_str()
+    }
+    fn to_bool(&self) -> TResult<bool> { Ok(false) }
+}
+
+impl TNone {
+    pub fn a_none() -> WrapValueObject {
+        WrapValueObject::from_box(Box::from(TNone::default()))
+    }
+}
+
+// pub struct IterObject{}
+
 pub type TList = Vec<WrapValueObject>;
+
+#[derive(Debug, Clone)]
+pub struct TListIter {
+    list: TList,
+    this: usize,
+}
 
 impl ValueObject for TList {
     fn add(&self, right: &Box<dyn ValueObject>) -> TResult<WrapValueObject> {
@@ -334,28 +396,42 @@ impl ValueObject for TList {
     }
     fn to_str(&self) -> TResult<String> {
         let mut v = String::new();
-        for i in self {
-            let i = i.unwrap().to_str()?;
-            v.push_str(i.as_str());
+        v.push('[');
+        let mut self_iter = self.iter();
+        if let Some(i) = self_iter.next() {
+            v.push_str(i.to_repr_str()?.as_str());
+            for i in self_iter {
+                v.push_str(", ");
+                v.push_str(i.to_repr_str()?.as_str());
+            }
         }
+        v.push(']');
         Ok(v)
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Default)]
-pub struct TNone;
-
-impl ValueObject for TNone {
-    fn eq(&self, right: &Box<dyn ValueObject>) -> TResult<bool> { Ok(self.tid() == right.tid()) }
-    fn to_str(&self) -> TResult<String> {
-        Ok(format!("None"))
+    fn to_repr_str(&self) -> TResult<String> {
+        self.to_str()
     }
-    fn to_bool(&self) -> TResult<bool> { Ok(false) }
+    fn get_iter(&self) -> TResult<WrapValueObject> {
+        Ok(WrapValueObject::from_box(Box::new(TListIter {
+            list: self.clone(),
+            this: 0,
+        })))
+    }
 }
 
-impl TNone {
-    pub fn a_none() -> WrapValueObject {
-        WrapValueObject::from_box(Box::from(TNone::default()))
+impl ValueObject for TListIter {
+    fn get_iter(&self) -> TResult<WrapValueObject> { Ok(WrapValueObject::from_box(Box::new(self.clone()))) }
+    fn iter_next(&mut self) -> TResult<Option<WrapValueObject>> {
+        let v = self.list.get(self.this);
+        match v {
+            Some(v) => {
+                self.this = self.this + 1;
+                Ok(Some(v.clone()))
+            }
+            None => {
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -381,6 +457,9 @@ impl ValueObject for TTargetObject {
             }
         }
         Ok(format!(r#"TargetObject("{}", body_size={}, require=[{}])"#, self.name, self.body.len(), require_str))
+    }
+    fn to_repr_str(&self) -> TResult<String> {
+        self.to_str()
     }
 }
 
