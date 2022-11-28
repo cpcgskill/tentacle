@@ -272,6 +272,9 @@ else:
 
 
 message test_list [1, "1", 1+2*3, (1+2)]
+
+for $i in [0, 1, 2, 3, 4, 5, 6]:
+    message for index $i
 "###;
         let mut space = RunSpace::default();
         println!("# test exec_code: ");
