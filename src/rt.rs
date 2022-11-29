@@ -94,12 +94,20 @@ pub fn exec_ast(ast: &ast::Node, space: &mut RunSpace) -> TResult<WrapValueObjec
                 let v = v.unwrap().to_str()?;
                 args_str.push(v);
             }
+
+            let mut out_str = args_str.clone();
+            out_str.insert(0, command.clone());
+            let out_str = out_str.join(" ");
+            println!("{}", out_str);
+
             if let Some(f) = space.local_commands.get(command) {
                 return f(args_str);
             }
+
             let p = std::process::Command::new(command).args(args_str).output();
             match p {
                 Ok(v) => {
+                    // println!("{}", String::from_utf8(v.stdout)?);
                     let v = v.status.code().map_or(
                         TNone::a_none(),
                         |v| { WrapValueObject::from_box(Box::from(v as i64)) },
